@@ -18,9 +18,11 @@ class OpenDriveBackend(backend.Backend):
         self.parsed_url = parsed_url
         self.username = parsed_url.username
         self.password = self.get_password()
-        self.directory = parsed_url.path
+        self.directory = parsed_url.path.replace("/", "")
+        if self.directory == "":
+            self.directory = "0"
 
-        self.baseurl = "https://dev.opendrive.com/api/v1"
+        self.baseurl = "https://dev.opendrive.com/api/v1/"
 
         self.sessionid = None
 
@@ -39,6 +41,16 @@ class OpenDriveBackend(backend.Backend):
         req.get_method = lambda: 'POST'
         return urllib2.urlopen(req)
 
+    def __dogetrequest(self, url):
+        """
+        Go a Get Request
+        :param url: URL to GET
+        :return: Response Object
+        """
+        req = urllib2.Request(url)
+        req.get_method = lambda: 'GET'
+        return urllib2.urlopen(req)
+
     def __decodejson(self, data):
         """
         Decode a JSON Object
@@ -52,7 +64,27 @@ class OpenDriveBackend(backend.Backend):
         """
         Return list of filenames (byte strings) present in backend
         """
-        pass
+        try:
+            self.login()
+            log.Info("Listing files in directory %s" % self.directory)
+
+            listurl = self.baseurl + "folder/list.json/" + self.sessionid + "/" + self.directory
+
+            resp = self.__dogetrequest(listurl)
+            status = resp.getcode()
+            if status != 200:
+                log.FatalError("Failed to list files in directory %s, API Returned Status: %d" % (self.directory, status))
+                raise BackendException("Failed to list files in directory %s, API Returned Status: %d" % (self.directory, status))
+
+            data = resp.read()
+            directoryinfo = self.__decodejson(data)
+            files = []
+            for fileinfo in directoryinfo["Files"]:
+                files.append(fileinfo["Name"])
+            return files
+        except:
+            log.FatalError("Error listing files in directory %s" % self.directory)
+            raise BackendException("Error listing files in directoy %s" % self.directory)
 
     def get(self, remote_filename, local_path):
         """Retrieve remote_filename and place in local_path"""
@@ -84,26 +116,27 @@ class OpenDriveBackend(backend.Backend):
         """
         pass
 
-    def login(self):
+    def login(self, forced=False):
         """
         Login to OpenDrive
         """
         try:
-            self.close()
-            log.Info("Logging in to OpenDrive")
+            if not self.sessionid or forced:
+                self.close()
+                log.Info("Logging in to OpenDrive")
 
-            loginurl = self.baseurl + "session/login.json"
-            logindata = {"username": self.username, "passwd": self.password}
+                loginurl = self.baseurl + "session/login.json"
+                logindata = {"username": self.username, "passwd": self.password}
 
-            resp = self.__dopostrequest(loginurl, logindata)
-            status = resp.getcode()
-            if status != 200:
-                log.FatalError("Login failed, API returned Status code: %d" % status)
-                raise BackendException("Error logging in to OpenDrive. API Returned Status %d" % status)
+                resp = self.__dopostrequest(loginurl, logindata)
+                status = resp.getcode()
+                if status != 200:
+                    log.FatalError("Login failed, API returned Status code: %d" % status)
+                    raise BackendException("Error logging in to OpenDrive. API Returned Status %d" % status)
 
-            data = resp.read()
-            userinfo = self.__decodejson(data)
-            self.sessionid = userinfo["SessionID"]
+                data = resp.read()
+                userinfo = self.__decodejson(data)
+                self.sessionid = userinfo["SessionID"]
         except:
             log.FatalError("Failed to login to OpenDrive")
             raise BackendException("Error logging in to OpenDrive")
