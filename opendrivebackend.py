@@ -59,6 +59,41 @@ class OpenDriveBackend(backend.Backend):
         strdata = data.decode('utf8')
         return json.loads(strdata)
 
+    def __getfileidfromname(self, filename):
+        """
+        Get the File ID from the Filename
+        :param filename: Filename
+        :return: File ID (None if not found)
+        """
+        try:
+            self.login()
+            log.Info("Load File ID for Filename: %s" % filename)
+
+            listurl = self.baseurl + "folder/list.json/" + self.sessionid + "/" + self.directory
+
+            resp = self.__dogetrequest(listurl)
+            status = resp.getcode()
+            if status == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+                return self.__getfileidfromname(filename)
+            elif status != 200:
+                log.FatalError("Failed to list files in directory %s to get file id for dile %s , API Returned Status: %d" % (self.directory, filename, status))
+                return None
+            else:
+                self.retry = 0
+
+            data = resp.read()
+            directoryinfo = self.__decodejson(data)
+            for fileinfo in directoryinfo["Files"]:
+                if fileinfo["Name"] == filename:
+                    return fileinfo["FileId"]
+
+            return None
+        except:
+            log.Warn("Error loading file id from filename for %s" % filename)
+            return None
+
     def _list(self):
         """
         Return list of filenames (byte strings) present in backend
@@ -74,6 +109,7 @@ class OpenDriveBackend(backend.Backend):
             if status == 401:
                 log.Warn("Session expired")
                 self.login(forced=True)
+                return self._list()
             elif status != 200:
                 log.FatalError("Failed to list files in directory %s, API Returned Status: %d" % (self.directory, status))
                 raise BackendException("Failed to list files in directory %s, API Returned Status: %d" % (self.directory, status))
@@ -107,7 +143,38 @@ class OpenDriveBackend(backend.Backend):
         """
         Delete each filename in filename_list, in order if possible.
         """
-        pass
+        try:
+            self.login()
+            log.Info("Delete files")
+
+            deleteurl = self.baseurl + "file/trash.json"
+
+            for filename in filename_list:
+                try:
+                    log.Info("Delete file: %s" % filename)
+                    fileid = self.__getfileidfromname(filename)
+                    if not fileid:
+                        pass
+
+                    deletedata = {"session_id": self.sessionid, "file_id": fileid}
+
+                    resp = self.__dopostrequest(deleteurl, deletedata)
+                    status = resp.getcode()
+                    if status == 401:
+                        log.Warn("Session expired")
+                        self.login(forced=True)
+                        return self.delete(filename_list)
+                    elif status != 200:
+                        log.FatalError("Failed to delete file %s in directory %s, API Returned Status: %d" % (filename, self.directory, status))
+                        pass
+                    else:
+                        self.retry = 0
+                except:
+                    log.FatalError("Error deleting file %s" % filename)
+                    raise BackendException("Error deleting file %s" % filename)
+        except:
+            log.FatalError("Error deleting files")
+            raise BackendException("Error deleting files")
 
     def _query_file_info(self, filename):
         """
