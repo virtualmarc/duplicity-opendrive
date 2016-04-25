@@ -78,7 +78,7 @@ class OpenDriveBackend(backend.Backend):
                 self.login(forced=True)
                 return self.__getfileidfromname(filename)
             elif status != 200:
-                log.FatalError("Failed to list files in directory %s to get file id for dile %s , API Returned Status: %d" % (self.directory, filename, status))
+                log.FatalError("Failed to list files in directory %s to get file id for file %s , API Returned Status: %d" % (self.directory, filename, status))
                 return None
             else:
                 self.retry = 0
@@ -96,7 +96,7 @@ class OpenDriveBackend(backend.Backend):
                 self.login(forced=True)
                 return self.__getfileidfromname(filename)
             else:
-                log.FatalError("Failed to list files in directory %s to get file id for dile %s , API Returned Status: %d" % (self.directory, filename, e.code))
+                log.FatalError("Failed to list files in directory %s to get file id for file %s , API Returned Status: %d" % (self.directory, filename, e.code))
                 return None
         except not BackendException:
             log.Warn("Error loading file id from filename for %s" % filename)
@@ -237,7 +237,42 @@ class OpenDriveBackend(backend.Backend):
                 if -1, file is not found
                 if None, error querying file
         """
-        pass
+        try:
+            self.login()
+            log.Info("Load File Size for Filename: %s" % filename)
+
+            listurl = self.baseurl + "folder/itembyname.json/" + self.sessionid + "/" + self.directory + "?name=" + filename
+
+            resp = self.__dogetrequest(listurl)
+            status = resp.getcode()
+            if status == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+                return self.__getfileidfromname(filename)
+            elif status != 200:
+                log.FatalError("Failed to list files in directory %s to get file size for file %s , API Returned Status: %d" % (self.directory, filename, status))
+                return {"size": -1}
+            else:
+                self.retry = 0
+
+            data = resp.read()
+            directoryinfo = self.__decodejson(data)
+            for fileinfo in directoryinfo["Files"]:
+                if fileinfo["Name"] == filename:
+                    return {"size": fileinfo["Size"]}
+
+            return {"size": -1}
+        except urllib2.HTTPError as e:
+            if e.code == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+                return self.__getfileidfromname(filename)
+            else:
+                log.FatalError("Failed to list files in directory %s to get file size for file %s , API Returned Status: %d" % (self.directory, filename, e.code))
+                return {"size": -1}
+        except not BackendException:
+            log.Warn("Error loading file id from filename for %s" % filename)
+            return {"size": None}
 
     def login(self, forced=False):
         """
