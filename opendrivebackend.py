@@ -90,7 +90,15 @@ class OpenDriveBackend(backend.Backend):
                     return fileinfo["FileId"]
 
             return None
-        except:
+        except urllib2.HTTPError as e:
+            if e.code == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+                return self.__getfileidfromname(filename)
+            else:
+                log.FatalError("Failed to list files in directory %s to get file id for dile %s , API Returned Status: %d" % (self.directory, filename, e.code))
+                return None
+        except not BackendException:
             log.Warn("Error loading file id from filename for %s" % filename)
             return None
 
@@ -122,13 +130,57 @@ class OpenDriveBackend(backend.Backend):
             for fileinfo in directoryinfo["Files"]:
                 files.append(fileinfo["Name"])
             return files
-        except:
+        except urllib2.HTTPError as e:
+            if e.code == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+                return self._list()
+            else:
+                log.FatalError("Failed to list files in directory %s, API Returned Status: %d" % (self.directory, e.code))
+                raise BackendException("Failed to list files in directory %s, API Returned Status: %d" % (self.directory, e.code))
+        except not BackendException:
             log.FatalError("Error listing files in directory %s" % self.directory)
             raise BackendException("Error listing files in directoy %s" % self.directory)
 
     def get(self, remote_filename, local_path):
         """Retrieve remote_filename and place in local_path"""
-        pass
+        try:
+            self.login()
+            log.Info("Downloading %s to %s" % (remote_filename, local_path))
+
+            fileid = self.__getfileidfromname(remote_filename)
+            if not fileid:
+                log.FatalError("File %s not found" % remote_filename)
+                raise BackendException("File %s not found" % remote_filename)
+
+            downloadurl = self.baseurl + "download/file.json/" + fileid + "?session_id=" + self.sessionid
+
+            resp = self.__dogetrequest(downloadurl)
+            status = resp.getcode()
+            if status == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+                return self.get(remote_filename, local_path)
+            elif status != 200:
+                log.FatalError("Error downloading remote file %s to local path %s" % (remote_filename, local_path))
+                raise BackendException("Error downloading remote file %s to local path %s" % (remote_filename, local_path))
+            else:
+                self.retry = 0
+
+            f = open(local_path, mode="w")
+            f.write(resp.read())
+            f.close()
+        except urllib2.HTTPError as e:
+            if e.code == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+                return self.get(remote_filename, local_path)
+            else:
+                log.FatalError("Error downloading remote file %s to local path %s" % (remote_filename, local_path))
+                raise BackendException("Error downloading remote file %s to local path %s" % (remote_filename, local_path))
+        except not BackendException:
+            log.FatalError("Error downloading remote file %s to local path %s" % (remote_filename, local_path))
+            raise BackendException("Error downloading remote file %s to local path %s" % (remote_filename, local_path))
 
     def put(self, source_path, remote_filename=None):
         """
@@ -169,10 +221,10 @@ class OpenDriveBackend(backend.Backend):
                         pass
                     else:
                         self.retry = 0
-                except:
+                except not BackendException:
                     log.FatalError("Error deleting file %s" % filename)
                     raise BackendException("Error deleting file %s" % filename)
-        except:
+        except not BackendException:
             log.FatalError("Error deleting files")
             raise BackendException("Error deleting files")
 
@@ -216,7 +268,7 @@ class OpenDriveBackend(backend.Backend):
                 data = resp.read()
                 userinfo = self.__decodejson(data)
                 self.sessionid = userinfo["SessionID"]
-        except:
+        except not BackendException:
             log.FatalError("Failed to login to OpenDrive")
             raise BackendException("Error logging in to OpenDrive")
 
@@ -239,7 +291,7 @@ class OpenDriveBackend(backend.Backend):
 
                 self.sessionid = None
                 self.retry = 0
-        except:
+        except not BackendException:
             log.Warn("Logout failed")
 
 
