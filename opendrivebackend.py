@@ -1,7 +1,5 @@
 from duplicity import backend
-from duplicity import globals
 from duplicity import log
-from duplicity import util
 from duplicity.errors import BackendException
 import urllib2
 import json
@@ -25,6 +23,7 @@ class OpenDriveBackend(backend.Backend):
         self.baseurl = "https://dev.opendrive.com/api/v1/"
 
         self.sessionid = None
+        self.retry = 0
 
         log.Info("Using OpenDrive Backend with directory ID %s" % self.directory)
 
@@ -72,9 +71,14 @@ class OpenDriveBackend(backend.Backend):
 
             resp = self.__dogetrequest(listurl)
             status = resp.getcode()
-            if status != 200:
+            if status == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+            elif status != 200:
                 log.FatalError("Failed to list files in directory %s, API Returned Status: %d" % (self.directory, status))
                 raise BackendException("Failed to list files in directory %s, API Returned Status: %d" % (self.directory, status))
+            else:
+                self.retry = 0
 
             data = resp.read()
             directoryinfo = self.__decodejson(data)
@@ -123,6 +127,14 @@ class OpenDriveBackend(backend.Backend):
         try:
             if not self.sessionid or forced:
                 self.close()
+
+                if forced:
+                    if self.retry >= 5:
+                        log.FatalError("Login Retry Limit of 5 reached")
+                        raise BackendException("Login Retry Limit of 5 reached")
+                    else:
+                        self.retry += 1
+
                 log.Info("Logging in to OpenDrive")
 
                 loginurl = self.baseurl + "session/login.json"
@@ -159,6 +171,7 @@ class OpenDriveBackend(backend.Backend):
                     log.Warn("Logout failed, API Returned Status Code: %d" % status)
 
                 self.sessionid = None
+                self.retry = 0
         except:
             log.Warn("Logout failed")
 
