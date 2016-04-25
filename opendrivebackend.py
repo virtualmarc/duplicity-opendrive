@@ -69,7 +69,7 @@ class OpenDriveBackend(backend.Backend):
             self.login()
             log.Info("Load File ID for Filename: %s" % filename)
 
-            listurl = self.baseurl + "folder/list.json/" + self.sessionid + "/" + self.directory
+            listurl = self.baseurl + "folder/itembyname.json/" + self.sessionid + "/" + self.directory + "?name=" + filename
 
             resp = self.__dogetrequest(listurl)
             status = resp.getcode()
