@@ -1,11 +1,10 @@
-import os
-
 from duplicity import backend
 from duplicity import log
 from duplicity.errors import BackendException
 import urllib2
 import json
 from os import path
+from hashlib import md5
 
 
 class OpenDriveBackend(backend.Backend):
@@ -64,6 +63,13 @@ class OpenDriveBackend(backend.Backend):
         """
         strdata = data.decode('utf8')
         return json.loads(strdata)
+
+    def md5(self, fname):
+        hash_md5 = md5()
+        with open(fname, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hash_md5.update(chunk)
+        return hash_md5.hexdigest()
 
     def __getfileidfromname(self, filename):
         """
@@ -205,12 +211,36 @@ class OpenDriveBackend(backend.Backend):
 
             srcfile = open(source_path, "r")
             size = path.getsize(source_path)
+            mtime = path.getmtime(source_path)
 
             fileid = self.__createfile(remote_filename, size)
             log.Info("File ID: %s" % fileid)
 
             tmplocation = self.__openfileupload(fileid, size)
-            log.Info("Temp Location: %s" & tmplocation)
+            log.Info("Temp Location: %s" % tmplocation)
+
+            self.__upload(srcfile, size, fileid, tmplocation)
+
+            remote_hash = self.__closefileupload(fileid, tmplocation, size, mtime).lower()
+            log.Info("Remote File MD5 Hash: %s" % remote_hash)
+
+            local_hash = self.md5(source_path)
+            log.Info("Local File MD5 Hash: %s" % local_hash).lower()
+
+            if remote_hash == local_hash:
+                log.Info("Hash match, upload successful")
+                self.retry = 0
+                self.chunkretry = 0
+                self.closeretry = 0
+                self.uploadretry = 0
+            else:
+                log.Warn("Hash missmatch, retry upload")
+                self.delete([remote_filename])
+                self.uploadretry += 1
+
+            if self.uploadretry > 5:
+                log.FatalError("Uploads failed %d times, giving up" % self.uploadretry)
+                raise BackendException("Uploads failed %d times, giving up" % self.uploadretry)
         except not BackendException:
             log.FatalError("Error uploading file %s" % source_path)
             raise BackendException("Error uploading file %s" % source_path)
@@ -297,14 +327,26 @@ class OpenDriveBackend(backend.Backend):
             log.FatalError("Error opening file upload for dile %s with size %d" % (fileid, size))
             raise BackendException("Error opening file upload for dile %s with size %d" % (fileid, size))
 
-    def __upload(self, srcfile, size, fileid):
+    def __upload(self, srcfile, size, fileid, tmpfile):
         """
         Upload the file
         :param srcfile: Source File
         :param size: Filesize
         :param fileid: File ID
+        :param tmpfile: Temp File
         """
+        pass
 
+    def __closefileupload(self, fileid, tmpfile, size, filetime):
+        """
+        Close the file upload
+        :param fileid: File ID
+        :param tmpfile: Temp File
+        :param size: Filesize
+        :param filetime: File modification time
+        :return: File MD5 Hash
+        """
+        pass
 
     def delete(self, filename_list):
         """
