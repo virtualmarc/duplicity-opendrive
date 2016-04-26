@@ -307,8 +307,8 @@ class OpenDriveBackend(backend.Backend):
                 self.login(forced=True)
                 return self.__openfileupload(fileid, size)
             elif status != 200:
-                log.FatalError("Error opening file upload for dile %s with size %d (API returned %d)" % (fileid, size, status))
-                raise BackendException("Error opening file upload for dile %s with size %d (API returned %d)" % (fileid, size, status))
+                log.FatalError("Error opening file upload for file %s with size %d (API returned %d)" % (fileid, size, status))
+                raise BackendException("Error opening file upload for file %s with size %d (API returned %d)" % (fileid, size, status))
             else:
                 self.retry = 0
 
@@ -321,11 +321,11 @@ class OpenDriveBackend(backend.Backend):
                 self.login(forced=True)
                 return self.__openfileupload(fileid, size)
             else:
-                log.FatalError("Error opening file upload for dile %s with size %d (API returned %d)" % (fileid, size, e.code))
-                raise BackendException("Error opening file upload for dile %s with size %d (API returned %d)" % (fileid, size, e.code))
+                log.FatalError("Error opening file upload for file %s with size %d (API returned %d)" % (fileid, size, e.code))
+                raise BackendException("Error opening file upload for file %s with size %d (API returned %d)" % (fileid, size, e.code))
         except not BackendException:
-            log.FatalError("Error opening file upload for dile %s with size %d" % (fileid, size))
-            raise BackendException("Error opening file upload for dile %s with size %d" % (fileid, size))
+            log.FatalError("Error opening file upload for file %s with size %d" % (fileid, size))
+            raise BackendException("Error opening file upload for file %s with size %d" % (fileid, size))
 
     def __upload(self, srcfile, size, fileid, tmpfile):
         """
@@ -346,7 +346,40 @@ class OpenDriveBackend(backend.Backend):
         :param filetime: File modification time
         :return: File MD5 Hash
         """
-        pass
+        try:
+            self.login()
+            log.Info("Close file upload for file %s (%s) with size %d and time %d" % (fileid, tmpfile, size, filetime))
+
+            closeurl = self.baseurl + "upload/close_file_upload.json"
+            closedata = {"session_id": self.sessionid, "file_id": fileid, "temp_location": tmpfile, "file_time": filetime, "file_size": size, "access_folder_id": ""}
+
+            resp = self.__dopostrequest(closeurl, closedata)
+            status = resp.getcode()
+
+            if status == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+                return self.__openfileupload(fileid, size)
+            elif status != 200:
+                log.FatalError("Error closing file upload for file %s (API returned %d)" % (fileid, status))
+                raise BackendException("Error closing file upload for file %s (API returned %d)" % (fileid, status))
+            else:
+                self.retry = 0
+
+            data = resp.read()
+            closeinfo = self.__decodejson(data)
+            return closeinfo["FileHash"]
+        except urllib2.HTTPError as e:
+            if e.code == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+                return self.__openfileupload(fileid, size)
+            else:
+                log.FatalError("Error closing file upload for file %s (API returned %d)" % (fileid, e.code))
+                raise BackendException("Error closing file upload for file %s (API returned %d)" % (fileid, e.code))
+        except not BackendException:
+            log.FatalError("Error closing file upload for file %s" % fileid)
+            raise BackendException("Error closing file upload for file %s" % fileid)
 
     def delete(self, filename_list):
         """
