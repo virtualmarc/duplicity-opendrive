@@ -5,6 +5,7 @@ import urllib2
 import json
 from os import path
 from hashlib import md5
+from requests import post
 
 
 class OpenDriveBackend(backend.Backend):
@@ -23,6 +24,7 @@ class OpenDriveBackend(backend.Backend):
             self.directory = "0"
 
         self.baseurl = "https://dev.opendrive.com/api/v1/"
+        self.chunksize = 10 * 1024 * 1024  # 10 MiB
 
         self.sessionid = None
         self.retry = 0
@@ -209,7 +211,6 @@ class OpenDriveBackend(backend.Backend):
                 remote_filename = path.basename(source_path)
                 log.Info("Set remote Filename to %s" % remote_filename)
 
-            srcfile = open(source_path, "r")
             size = path.getsize(source_path)
             mtime = path.getmtime(source_path)
 
@@ -219,7 +220,7 @@ class OpenDriveBackend(backend.Backend):
             tmplocation = self.__openfileupload(fileid, size)
             log.Info("Temp Location: %s" % tmplocation)
 
-            self.__upload(srcfile, size, fileid, tmplocation)
+            self.__upload(remote_filename, source_path, size, fileid, tmplocation)
 
             remote_hash = self.__closefileupload(fileid, tmplocation, size, mtime).lower()
             log.Info("Remote File MD5 Hash: %s" % remote_hash)
@@ -237,10 +238,17 @@ class OpenDriveBackend(backend.Backend):
                 log.Warn("Hash missmatch, retry upload")
                 self.delete([remote_filename])
                 self.uploadretry += 1
+                self.put(source_path, remote_filename)
+                return
 
             if self.uploadretry > 5:
                 log.FatalError("Uploads failed %d times, giving up" % self.uploadretry)
                 raise BackendException("Uploads failed %d times, giving up" % self.uploadretry)
+        except IOError:
+            self.delete([remote_filename])
+            self.uploadretry += 1
+            self.put(source_path, remote_filename)
+            return
         except not BackendException:
             log.FatalError("Error uploading file %s" % source_path)
             raise BackendException("Error uploading file %s" % source_path)
@@ -327,15 +335,81 @@ class OpenDriveBackend(backend.Backend):
             log.FatalError("Error opening file upload for file %s with size %d" % (fileid, size))
             raise BackendException("Error opening file upload for file %s with size %d" % (fileid, size))
 
-    def __upload(self, srcfile, size, fileid, tmpfile):
+    def __upload(self, filename, srcfile, size, fileid, tmpfile):
         """
         Upload the file
+        :param filename: Filename
         :param srcfile: Source File
         :param size: Filesize
         :param fileid: File ID
         :param tmpfile: Temp File
         """
-        pass
+        try:
+            log.Info("Upload File %s (%s => %s) with size %d" % (fileid, srcfile, tmpfile, size))
+
+            offset = 0
+
+            with open(srcfile, "rb") as f:
+                for chunk in iter(lambda: f.read(self.chunksize), b""):
+                    chunksize = len(chunk)
+                    self.__uploadchunk(filename, chunk, chunksize, offset, fileid, tmpfile)
+                    offset += chunksize
+
+        except not BackendException:
+            log.FatalError("Error uploading file %s" % fileid)
+            raise IOError
+
+    def __uploadchunk(self, filename, chunk, chunksize, offset, fileid, tmpfile):
+        """
+        Upload a chunk of the file
+        :param filename: Filename
+        :param chunk: Chunk data
+        :param chunksize: Chunk size
+        :param offset: Chunk offset
+        :param fileid: File ID
+        :param tmpfile: Tempfile
+        """
+        try:
+            if self.chunkretry > 5:
+                log.FatalError("Chunk retry count exceeded the limit and is %d" % self.chunkretry)
+                self.chunkretry = 0
+                raise IOError
+
+            log.Debug("Upload Chunk offset %d with size %d" % (offset, chunksize))
+
+            uploadchunkurl = self.baseurl + "upload/upload_file_chunk.json"
+            uploadchunkfiles = {"file_data": (filename, chunk, 'application/octet-stream')}
+            uploadchunkdataraw = {"session_id": self.sessionid, "file_id": fileid, "temp_location": tmpfile, "chunk_offset": offset, "chunk_size": chunksize}
+            uploadchunkdata = json.dumps(uploadchunkdataraw).encode('utf8')
+
+            resp = post(uploadchunkurl, data=uploadchunkdata, files=uploadchunkfiles)
+            status = resp.status_code
+
+            if status == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+                self.__uploadchunk(filename, chunk, chunksize, offset, fileid, tmpfile)
+                return
+            elif status != 200:
+                self.chunkretry += 1
+                self.__uploadchunk(filename, chunk, chunksize, offset, fileid, tmpfile)
+                return
+            else:
+                self.chunkretry = 0
+        except urllib2.HTTPError as e:
+            if e.code == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+                self.__uploadchunk(filename, chunk, chunksize, offset, fileid, tmpfile)
+                return
+            else:
+                log.Warn("Upload chunk failed with status %d" % e.code)
+                self.closeretry += 1
+                self.__uploadchunk(filename, chunk, chunksize, offset, fileid, tmpfile)
+                return
+        except not BackendException:
+            log.FatalError("Error on file chunk upload for file %s" % fileid)
+            raise IOError
 
     def __closefileupload(self, fileid, tmpfile, size, filetime):
         """
@@ -387,7 +461,7 @@ class OpenDriveBackend(backend.Backend):
                 return self.__openfileupload(fileid, size)
         except not BackendException:
             log.FatalError("Error closing file upload for file %s" % fileid)
-            raise BackendException("Error closing file upload for file %s" % fileid)
+            return "fail"
 
     def delete(self, filename_list):
         """
