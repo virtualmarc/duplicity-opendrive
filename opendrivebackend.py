@@ -347,6 +347,11 @@ class OpenDriveBackend(backend.Backend):
         :return: File MD5 Hash
         """
         try:
+            if self.closeretry > 5:
+                log.Error("Closing file upload failed %d times" % self.closeretry)
+                self.closeretry = 0
+                return "failed"
+
             self.login()
             log.Info("Close file upload for file %s (%s) with size %d and time %d" % (fileid, tmpfile, size, filetime))
 
@@ -361,10 +366,12 @@ class OpenDriveBackend(backend.Backend):
                 self.login(forced=True)
                 return self.__openfileupload(fileid, size)
             elif status != 200:
-                log.FatalError("Error closing file upload for file %s (API returned %d)" % (fileid, status))
-                raise BackendException("Error closing file upload for file %s (API returned %d)" % (fileid, status))
+                log.Warn("Upload failed with status %d" % status)
+                self.closeretry += 1
+                return self.__openfileupload(fileid, size)
             else:
                 self.retry = 0
+                self.closeretry = 0
 
             data = resp.read()
             closeinfo = self.__decodejson(data)
@@ -375,8 +382,9 @@ class OpenDriveBackend(backend.Backend):
                 self.login(forced=True)
                 return self.__openfileupload(fileid, size)
             else:
-                log.FatalError("Error closing file upload for file %s (API returned %d)" % (fileid, e.code))
-                raise BackendException("Error closing file upload for file %s (API returned %d)" % (fileid, e.code))
+                log.Warn("Upload failed with status %d" % e.code)
+                self.closeretry += 1
+                return self.__openfileupload(fileid, size)
         except not BackendException:
             log.FatalError("Error closing file upload for file %s" % fileid)
             raise BackendException("Error closing file upload for file %s" % fileid)
