@@ -1,8 +1,11 @@
+import os
+
 from duplicity import backend
 from duplicity import log
 from duplicity.errors import BackendException
 import urllib2
 import json
+from os import path
 
 
 class OpenDriveBackend(backend.Backend):
@@ -24,6 +27,9 @@ class OpenDriveBackend(backend.Backend):
 
         self.sessionid = None
         self.retry = 0
+        self.chunkretry = 0
+        self.closeretry = 0
+        self.uploadretry = 0
 
         log.Info("Using OpenDrive Backend with directory ID %s" % self.directory)
 
@@ -189,7 +195,116 @@ class OpenDriveBackend(backend.Backend):
         If remote_filename is None, get the filename from the last
         path component of pathname.
         """
-        pass
+        try:
+            self.login()
+            log.Info("Upload %s to %s" % (source_path, remote_filename))
+
+            if not remote_filename:
+                remote_filename = path.basename(source_path)
+                log.Info("Set remote Filename to %s" % remote_filename)
+
+            srcfile = open(source_path, "r")
+            size = path.getsize(source_path)
+
+            fileid = self.__createfile(remote_filename, size)
+            log.Info("File ID: %s" % fileid)
+
+            tmplocation = self.__openfileupload(fileid, size)
+            log.Info("Temp Location: %s" & tmplocation)
+        except not BackendException:
+            log.FatalError("Error uploading file %s" % source_path)
+            raise BackendException("Error uploading file %s" % source_path)
+
+    def __createfile(self, filename, filesize):
+        """
+        Create the new file on OpenDrive and get the File ID
+        :param filename: remote filename
+        :param filesize: size of the file in bytes
+        :return: File ID
+        """
+        try:
+            self.login()
+            log.Info("Create remote file %s with size %d" % (filename, filesize))
+
+            createfileurl = self.baseurl + "upload/create_file.json"
+            createfiledata = {"session_id": self.sessionid, "folder_id": self.directory, "file_name": filename, "file_size": filesize, "access_folder_id": "", "open_existing": "false"}
+
+            resp = self.__dopostrequest(createfileurl, createfiledata)
+            status = resp.getcode()
+
+            if status == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+                return self.__createfile(filename, filesize)
+            elif status != 200:
+                log.FatalError("Error creating remote file %s with size %d (API returned %d)" % (filename, filesize, status))
+                raise BackendException("Error creating remote file %s with size %d (API returned %d)" % (filename, filesize, status))
+            else:
+                self.retry = 0
+
+            data = resp.read()
+            createfileinfo = self.__decodejson(data)
+            return createfileinfo["FileId"]
+        except urllib2.HTTPError as e:
+            if e.code == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+                return self.__createfile(filename, filesize)
+            else:
+                log.FatalError("Error creating remote file %s with size %d (API returned %d)" % (filename, filesize, e.code))
+                raise BackendException("Error creating remote file %s with size %d (API returned %d)" % (filename, filesize, e.code))
+        except not BackendException:
+            log.FatalError("Error creating remote file %s with size %d" % (filename, filesize))
+            raise BackendException("Error creating remote file %s with size %d" % (filename, filesize))
+
+    def __openfileupload(self, fileid, size):
+        """
+        Open a new File Upload
+        :param size: Filesize
+        :return: Temp Location
+        """
+        try:
+            log.Info("Open file upload for file %s with size %d" % (fileid, size))
+
+            openfileuplurl = self.baseurl + "upload/open_file_upload.json"
+            openfileupldata = {"session_id": self.sessionid, "file_id": fileid, "file_size": size, "access_folder_id": ""}
+
+            resp = self.__dopostrequest(openfileuplurl, openfileupldata)
+            status = resp.getcode()
+
+            if status == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+                return self.__openfileupload(fileid, size)
+            elif status != 200:
+                log.FatalError("Error opening file upload for dile %s with size %d (API returned %d)" % (fileid, size, status))
+                raise BackendException("Error opening file upload for dile %s with size %d (API returned %d)" % (fileid, size, status))
+            else:
+                self.retry = 0
+
+            data = resp.read()
+            openfileuplinfo = self.__decodejson(data)
+            return openfileuplinfo["TempLocation"]
+        except urllib2.HTTPError as e:
+            if e.code == 401:
+                log.Warn("Session expired")
+                self.login(forced=True)
+                return self.__openfileupload(fileid, size)
+            else:
+                log.FatalError("Error opening file upload for dile %s with size %d (API returned %d)" % (fileid, size, e.code))
+                raise BackendException("Error opening file upload for dile %s with size %d (API returned %d)" % (fileid, size, e.code))
+        except not BackendException:
+            log.FatalError("Error opening file upload for dile %s with size %d" % (fileid, size))
+            raise BackendException("Error opening file upload for dile %s with size %d" % (fileid, size))
+
+    def __upload(self, srcfile, size, fileid):
+        """
+        Upload the file
+        :param srcfile: Source File
+        :param size: Filesize
+        :param fileid: File ID
+        """
+
 
     def delete(self, filename_list):
         """
@@ -324,8 +439,11 @@ class OpenDriveBackend(backend.Backend):
                 if status != 200:
                     log.Warn("Logout failed, API Returned Status Code: %d" % status)
 
-                self.sessionid = None
-                self.retry = 0
+            self.sessionid = None
+            self.retry = 0
+            self.chunkretry = 0
+            self.closeretry = 0
+            self.uploadretry = 0
         except not BackendException:
             log.Warn("Logout failed")
 
