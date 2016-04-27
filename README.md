@@ -14,5 +14,5 @@ cp opendrivebackend.py /Library/Frameworks/Python.framework/Versions/2.7/lib/pyt
 
 # Usage
 ```
-duplicity source_path opendrive://email@addr.tld:password@od/directoryid
+duplicity source_path opendrive://email@addr.tld:password@opendrive.com/directoryid
 ```
