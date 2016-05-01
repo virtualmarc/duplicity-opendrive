@@ -8,6 +8,7 @@ import json
 from os import path
 from hashlib import md5
 from requests import post
+from requests import get
 import urlparse
 
 
@@ -198,28 +199,32 @@ class OpenDriveBackend(backend.Backend):
                 log.FatalError("File %s not found" % remote_filename)
                 raise BackendException("File %s not found" % remote_filename)
 
-            downloadurl = self.baseurl + "download/file.json/" + fileid + "?session_id=" + self.sessionid
+            downloadurl = self.baseurl + "download/file.json/" + fileid + "?session_id=" + self.sessionid + "&inline=true"
 
-            resp = self.__dogetrequest(downloadurl)
-            status = resp.getcode()
+            resp = get(downloadurl)
+            status = resp.status_code
             if status == 401:
                 log.Warn("Session expired: %s" % resp.read())
                 self.login(forced=True)
-                return self.get(remote_filename, real_local_path)
+                return self.get(remote_filename, local_path)
             elif status != 200:
                 log.FatalError("Error downloading remote file %s to local path %s, Status: %d (%s)" % (remote_filename, real_local_path, status, resp.read()))
                 raise BackendException("Error downloading remote file %s to local path %s, Status: %d (%s)" % (remote_filename, real_local_path, status, resp.read()))
             else:
                 self.retry = 0
 
-            f = open(real_local_path, mode="w")
-            f.write(resp.read())
-            f.close()
+            flocal = local_path.open("wb")
+            for chunk in resp.iter_content(self.chunksize):
+                flocal.write(chunk)
+            flocal.close()
+            local_path.setdata()
+
+            log.Info("Downloaded %d Bytes with hash %s" % (path.getsize(real_local_path), self.md5(real_local_path).lower()))
         except urllib2.HTTPError as e:
             if e.code == 401:
                 log.Warn("Session expired: %s" % e.read())
                 self.login(forced=True)
-                return self.get(remote_filename, real_local_path)
+                return self.get(remote_filename, local_path)
             else:
                 log.FatalError("Error downloading remote file %s to local path %s, Status: %d (%s)" % (remote_filename, real_local_path, e.code, e.read()))
                 raise BackendException("Error downloading remote file %s to local path %s, Status: %d (%s)" % (remote_filename, real_local_path, e.code, e.read()))
@@ -270,7 +275,7 @@ class OpenDriveBackend(backend.Backend):
                 log.Warn("Hash missmatch, retry upload")
                 self.delete([remote_filename])
                 self.uploadretry += 1
-                self.put(real_source_path, remote_filename)
+                self.put(source_path, remote_filename)
                 return
 
             if self.uploadretry > 5:
@@ -279,7 +284,7 @@ class OpenDriveBackend(backend.Backend):
         except IOError:
             self.delete([remote_filename])
             self.uploadretry += 1
-            self.put(real_source_path, remote_filename)
+            self.put(source_path, remote_filename)
             return
         except not BackendException:
             log.FatalError("Error uploading file %s" % real_source_path)
