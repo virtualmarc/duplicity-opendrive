@@ -18,3 +18,14 @@ cp opendrivebackend.py /Library/Frameworks/Python.framework/Versions/2.7/lib/pyt
 ```
 duplicity source_path opendrive://email@addr.tld:password@opendrive.com/directoryid
 ```
+
+# Troubleshooting
+
+## UnsupportedBackendScheme: scheme not supported in url: opendrive://
+
+If you get this error and the backend script has been copied to the correct directory this means that a python module is missing.
+Try to install python-pip and run the following commands:
+
+```
+pip install requests
+```
