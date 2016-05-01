@@ -428,7 +428,7 @@ class OpenDriveBackend(backend.Backend):
             log.Info("Upload Chunk offset %d with size %d" % (offset, chunksize))
 
             uploadchunkurl = self.baseurl + "upload/upload_file_chunk.json"
-            uploadchunkfiles = {"file_data": (filename, chunk, 'application/octet-stream')}
+            uploadchunkfiles = {"file_data": (filename, chunk)}
             uploadchunkdataraw = {"session_id": self.sessionid, "file_id": fileid, "temp_location": tmpfile, "chunk_offset": offset, "chunk_size": chunksize}
 
             resp = post(uploadchunkurl, data=uploadchunkdataraw, files=uploadchunkfiles)
