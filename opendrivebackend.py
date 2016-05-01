@@ -324,6 +324,10 @@ class OpenDriveBackend(backend.Backend):
                 log.Warn("Session expired")
                 self.__login(forced=True)
                 return self.__createfile(filename, filesize)
+            elif status == 409:
+                log.Warn("File %s already existing, overwriting..." % filename)
+                self._delete([filename])
+                return self.__createfile(filename, filesize)
             elif status != 200:
                 log.FatalError("Error creating remote file %s with size %d (API returned %d: %s)" % (filename, filesize, status, resp.read()))
                 raise BackendException("Error creating remote file %s with size %d (API returned %d: %s)" % (filename, filesize, status, resp.read()))
@@ -337,6 +341,10 @@ class OpenDriveBackend(backend.Backend):
             if e.code == 401:
                 log.Warn("Session expired: %s" % e.read())
                 self.__login(forced=True)
+                return self.__createfile(filename, filesize)
+            elif e.code == 409:
+                log.Warn("File %s already existing, overwriting..." % filename)
+                self._delete([filename])
                 return self.__createfile(filename, filesize)
             else:
                 log.FatalError("Error creating remote file %s with size %d (API returned %d: %s)" % (filename, filesize, e.code, e.read()))
