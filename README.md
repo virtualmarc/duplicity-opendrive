@@ -7,6 +7,8 @@ This is a duplicity backend for the cloud storage service OpenDrive.
 ```
 # Linux
 cp opendrivebackend.py /usr/lib/python2.7/dist-packages/duplicity/backends/
+# or
+cp opendrivebackend.py /usr/local/lib/python2.7/dist-packages/duplicity/backends/
 
 # Mac OS X
 cp opendrivebackend.py /Library/Frameworks/Python.framework/Versions/2.7/lib/python2.7/site-packages/duplicity/backends
