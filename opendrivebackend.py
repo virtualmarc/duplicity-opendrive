@@ -97,7 +97,7 @@ class OpenDriveBackend(backend.Backend):
         strdata = data.decode('utf8')
         return json.loads(strdata)
 
-    def md5(self, fname):
+    def __md5(self, fname):
         hash_md5 = md5()
         with open(fname, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
@@ -111,7 +111,7 @@ class OpenDriveBackend(backend.Backend):
         :return: File ID (None if not found)
         """
         try:
-            self.login()
+            self.__login()
             log.Info("Load File ID for Filename: %s" % filename)
 
             listurl = self.baseurl + "folder/itembyname.json/" + self.sessionid + "/" + self.directory + "?name=" + filename
@@ -120,7 +120,7 @@ class OpenDriveBackend(backend.Backend):
             status = resp.getcode()
             if status == 401:
                 log.Warn("Session expired: %s" % resp.read())
-                self.login(forced=True)
+                self.__login(forced=True)
                 return self.__getfileidfromname(filename)
             elif status != 200:
                 log.FatalError("Failed to list files in directory %s to get file id for file %s , API Returned Status: %d (%s)" % (self.directory, filename, status, resp.read()))
@@ -138,7 +138,7 @@ class OpenDriveBackend(backend.Backend):
         except urllib2.HTTPError as e:
             if e.code == 401:
                 log.Warn("Session expired: %s" % e.read())
-                self.login(forced=True)
+                self.__login(forced=True)
                 return self.__getfileidfromname(filename)
             else:
                 log.FatalError("Failed to list files in directory %s to get file id for file %s , API Returned Status: %d (%s)" % (self.directory, filename, e.code, e.read()))
@@ -152,7 +152,7 @@ class OpenDriveBackend(backend.Backend):
         Return list of filenames (byte strings) present in backend
         """
         try:
-            self.login()
+            self.__login()
             log.Info("Listing files in directory %s" % self.directory)
 
             listurl = self.baseurl + "folder/list.json/" + self.sessionid + "/" + self.directory
@@ -161,7 +161,7 @@ class OpenDriveBackend(backend.Backend):
             status = resp.getcode()
             if status == 401:
                 log.Warn("Session expired: %s" % resp.read())
-                self.login(forced=True)
+                self.__login(forced=True)
                 return self._list()
             elif status != 200:
                 log.FatalError("Failed to list files in directory %s, API Returned Status: %d (%s)" % (self.directory, status, resp.read()))
@@ -178,7 +178,7 @@ class OpenDriveBackend(backend.Backend):
         except urllib2.HTTPError as e:
             if e.code == 401:
                 log.Warn("Session expired: %s" % e.read())
-                self.login(forced=True)
+                self.__login(forced=True)
                 return self._list()
             else:
                 log.FatalError("Failed to list files in directory %s, API Returned Status: %d (%s)" % (self.directory, e.code, e.read()))
@@ -189,9 +189,13 @@ class OpenDriveBackend(backend.Backend):
 
     def get(self, remote_filename, local_path):
         """Retrieve remote_filename and place in local_path"""
+        self._get(remote_filename, local_path)
+
+    def _get(self, remote_filename, local_path):
+        """Retrieve remote_filename and place in local_path"""
         real_local_path = local_path.name
         try:
-            self.login()
+            self.__login()
             log.Info("Downloading %s to %s" % (remote_filename, real_local_path))
 
             fileid = self.__getfileidfromname(remote_filename)
@@ -205,8 +209,8 @@ class OpenDriveBackend(backend.Backend):
             status = resp.status_code
             if status == 401:
                 log.Warn("Session expired: %s" % resp.read())
-                self.login(forced=True)
-                return self.get(remote_filename, local_path)
+                self.__login(forced=True)
+                return self._get(remote_filename, local_path)
             elif status != 200:
                 log.FatalError("Error downloading remote file %s to local path %s, Status: %d (%s)" % (remote_filename, real_local_path, status, resp.read()))
                 raise BackendException("Error downloading remote file %s to local path %s, Status: %d (%s)" % (remote_filename, real_local_path, status, resp.read()))
@@ -223,8 +227,8 @@ class OpenDriveBackend(backend.Backend):
         except urllib2.HTTPError as e:
             if e.code == 401:
                 log.Warn("Session expired: %s" % e.read())
-                self.login(forced=True)
-                return self.get(remote_filename, local_path)
+                self.__login(forced=True)
+                return self._get(remote_filename, local_path)
             else:
                 log.FatalError("Error downloading remote file %s to local path %s, Status: %d (%s)" % (remote_filename, real_local_path, e.code, e.read()))
                 raise BackendException("Error downloading remote file %s to local path %s, Status: %d (%s)" % (remote_filename, real_local_path, e.code, e.read()))
@@ -239,9 +243,18 @@ class OpenDriveBackend(backend.Backend):
         If remote_filename is None, get the filename from the last
         path component of pathname.
         """
+        self._put(source_path, remote_filename)
+
+    def _put(self, source_path, remote_filename=None):
+        """
+        Transfer source_path (Path object) to remote_filename (string)
+
+        If remote_filename is None, get the filename from the last
+        path component of pathname.
+        """
         real_source_path = source_path.name
         try:
-            self.login()
+            self.__login()
             log.Info("Upload %s to %s" % (real_source_path, remote_filename))
 
             if not remote_filename:
@@ -262,7 +275,7 @@ class OpenDriveBackend(backend.Backend):
             remote_hash = self.__closefileupload(fileid, tmplocation, size, mtime).lower()
             log.Info("Remote File MD5 Hash: %s" % remote_hash)
 
-            local_hash = self.md5(real_source_path).lower()
+            local_hash = self.__md5(real_source_path).lower()
             log.Info("Local File MD5 Hash: %s" % local_hash)
 
             if remote_hash == local_hash:
@@ -275,7 +288,7 @@ class OpenDriveBackend(backend.Backend):
                 log.Warn("Hash missmatch, retry upload")
                 self.delete([remote_filename])
                 self.uploadretry += 1
-                self.put(source_path, remote_filename)
+                self._put(source_path, remote_filename)
                 return
 
             if self.uploadretry > 5:
@@ -284,7 +297,7 @@ class OpenDriveBackend(backend.Backend):
         except IOError:
             self.delete([remote_filename])
             self.uploadretry += 1
-            self.put(source_path, remote_filename)
+            self._put(source_path, remote_filename)
             return
         except not BackendException:
             log.FatalError("Error uploading file %s" % real_source_path)
@@ -298,7 +311,7 @@ class OpenDriveBackend(backend.Backend):
         :return: File ID
         """
         try:
-            self.login()
+            self.__login()
             log.Info("Create remote file %s with size %d" % (filename, filesize))
 
             createfileurl = self.baseurl + "upload/create_file.json"
@@ -309,7 +322,7 @@ class OpenDriveBackend(backend.Backend):
 
             if status == 401:
                 log.Warn("Session expired")
-                self.login(forced=True)
+                self.__login(forced=True)
                 return self.__createfile(filename, filesize)
             elif status != 200:
                 log.FatalError("Error creating remote file %s with size %d (API returned %d: %s)" % (filename, filesize, status, resp.read()))
@@ -323,7 +336,7 @@ class OpenDriveBackend(backend.Backend):
         except urllib2.HTTPError as e:
             if e.code == 401:
                 log.Warn("Session expired: %s" % e.read())
-                self.login(forced=True)
+                self.__login(forced=True)
                 return self.__createfile(filename, filesize)
             else:
                 log.FatalError("Error creating remote file %s with size %d (API returned %d: %s)" % (filename, filesize, e.code, e.read()))
@@ -349,7 +362,7 @@ class OpenDriveBackend(backend.Backend):
 
             if status == 401:
                 log.Warn("Session expired: %s" % resp.read())
-                self.login(forced=True)
+                self.__login(forced=True)
                 return self.__openfileupload(fileid, size)
             elif status != 200:
                 log.FatalError("Error opening file upload for file %s with size %d (API returned %d: %s)" % (fileid, size, status, resp.read()))
@@ -363,7 +376,7 @@ class OpenDriveBackend(backend.Backend):
         except urllib2.HTTPError as e:
             if e.code == 401:
                 log.Warn("Session expired: %s" % e.read())
-                self.login(forced=True)
+                self.__login(forced=True)
                 return self.__openfileupload(fileid, size)
             else:
                 log.FatalError("Error opening file upload for file %s with size %d (API returned %d: %s)" % (fileid, size, e.code, e.read()))
@@ -423,7 +436,7 @@ class OpenDriveBackend(backend.Backend):
 
             if status == 401:
                 log.Warn("Session expired: %s" % resp.text)
-                self.login(forced=True)
+                self.__login(forced=True)
                 self.__uploadchunk(filename, chunk, chunksize, offset, fileid, tmpfile)
                 return
             elif status != 200:
@@ -436,7 +449,7 @@ class OpenDriveBackend(backend.Backend):
         except urllib2.HTTPError as e:
             if e.code == 401:
                 log.Warn("Session expired: %s" % e.read())
-                self.login(forced=True)
+                self.__login(forced=True)
                 self.__uploadchunk(filename, chunk, chunksize, offset, fileid, tmpfile)
                 return
             else:
@@ -463,7 +476,7 @@ class OpenDriveBackend(backend.Backend):
                 self.closeretry = 0
                 return "failed"
 
-            self.login()
+            self.__login()
             log.Info("Close file upload for file %s with size %d and time %d" % (fileid,  size, filetime))
 
             closeurl = self.baseurl + "upload/close_file_upload.json"
@@ -474,7 +487,7 @@ class OpenDriveBackend(backend.Backend):
 
             if status == 401:
                 log.Warn("Session expired: %s" % resp.read())
-                self.login(forced=True)
+                self.__login(forced=True)
                 return self.__closefileupload(fileid, tmpfile, size, filetime)
             elif status != 200:
                 log.Warn("Upload failed with status %d: %s" % (status, resp.read()))
@@ -490,7 +503,7 @@ class OpenDriveBackend(backend.Backend):
         except urllib2.HTTPError as e:
             if e.code == 401:
                 log.Warn("Session expired: %s" % e.read())
-                self.login(forced=True)
+                self.__login(forced=True)
                 return self.__closefileupload(fileid, tmpfile, size, filetime)
             else:
                 log.Warn("Upload failed with status %d: %s" % (e.code, e.read()))
@@ -504,8 +517,14 @@ class OpenDriveBackend(backend.Backend):
         """
         Delete each filename in filename_list, in order if possible.
         """
+        self._delete(filename_list)
+
+    def _delete(self, filename_list):
+        """
+        Delete each filename in filename_list, in order if possible.
+        """
         try:
-            self.login()
+            self.__login()
             log.Info("Delete files")
 
             deleteurl = self.baseurl + "file/trash.json"
@@ -523,8 +542,8 @@ class OpenDriveBackend(backend.Backend):
                     status = resp.getcode()
                     if status == 401:
                         log.Warn("Session expired: %s" % resp.read())
-                        self.login(forced=True)
-                        return self.delete(filename_list)
+                        self.__login(forced=True)
+                        return self._delete(filename_list)
                     elif status != 200:
                         log.FatalError("Failed to delete file %s in directory %s, API Returned Status: %d: %s" % (filename, self.directory, status, resp.read()))
                         pass
@@ -533,18 +552,21 @@ class OpenDriveBackend(backend.Backend):
                 except urllib2.HTTPError as e:
                     if e.code == 401:
                         log.Warn("Session expired: %s" % e.read())
-                        self.login(forced=True)
-                        return self.delete(filename_list)
+                        self.__login(forced=True)
+                        return self._delete(filename_list)
                     else:
                         log.Warn("Delete failed with status %d: %s" % (e.code, e.read()))
                         self.closeretry += 1
-                        return self.delete(filename_list)
+                        return self._delete(filename_list)
                 except not BackendException:
                     log.FatalError("Error deleting file %s" % filename)
                     raise BackendException("Error deleting file %s" % filename)
         except not BackendException:
             log.FatalError("Error deleting files")
             raise BackendException("Error deleting files")
+
+    def query_file_info(self, filename):
+        return self._query_file_info(filename)
 
     def _query_file_info(self, filename):
         """
@@ -556,7 +578,7 @@ class OpenDriveBackend(backend.Backend):
                 if None, error querying file
         """
         try:
-            self.login()
+            self.__login()
             log.Info("Load File Size for Filename: %s" % filename)
 
             listurl = self.baseurl + "folder/itembyname.json/" + self.sessionid + "/" + self.directory + "?name=" + filename
@@ -565,7 +587,7 @@ class OpenDriveBackend(backend.Backend):
             status = resp.getcode()
             if status == 401:
                 log.Warn("Session expired: %s" % resp.read())
-                self.login(forced=True)
+                self.__login(forced=True)
                 return self.__getfileidfromname(filename)
             elif status != 200:
                 log.FatalError("Failed to list files in directory %s to get file size for file %s , API Returned Status: %d: %s" % (self.directory, filename, status, resp.read()))
@@ -584,7 +606,7 @@ class OpenDriveBackend(backend.Backend):
         except urllib2.HTTPError as e:
             if e.code == 401:
                 log.Warn("Session expired: %s" % e.read())
-                self.login(forced=True)
+                self.__login(forced=True)
                 return self.__getfileidfromname(filename)
             else:
                 log.FatalError("Failed to list files in directory %s to get file size for file %s , API Returned Status: %d: %s" % (self.directory, filename, e.code, e.read()))
@@ -593,13 +615,13 @@ class OpenDriveBackend(backend.Backend):
             log.Warn("Error loading file id from filename for %s" % filename)
             return {"size": None}
 
-    def login(self, forced=False):
+    def __login(self, forced=False):
         """
         Login to OpenDrive
         """
         try:
             if not self.sessionid or forced:
-                self.close()
+                self._close()
 
                 if forced:
                     if self.retry >= 5:
@@ -630,6 +652,9 @@ class OpenDriveBackend(backend.Backend):
             raise BackendException("Error logging in to OpenDrive")
 
     def close(self):
+        self._close()
+
+    def _close(self):
         """
         Close the backend, releasing any resources held and
         invalidating any file objects obtained from the backend.
