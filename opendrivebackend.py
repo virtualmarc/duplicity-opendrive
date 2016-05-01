@@ -219,7 +219,7 @@ class OpenDriveBackend(backend.Backend):
             flocal.close()
             local_path.setdata()
 
-            log.Info("Downloaded %d Bytes with hash %s" % (path.getsize(real_local_path), self.md5(real_local_path).lower()))
+            # log.Info("Downloaded %d Bytes with hash %s" % (path.getsize(real_local_path), self.md5(real_local_path).lower()))
         except urllib2.HTTPError as e:
             if e.code == 401:
                 log.Warn("Session expired: %s" % e.read())
