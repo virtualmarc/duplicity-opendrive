@@ -205,7 +205,7 @@ class OpenDriveBackend(backend.Backend):
 
             downloadurl = self.baseurl + "download/file.json/" + fileid + "?session_id=" + self.sessionid + "&inline=true"
 
-            resp = get(downloadurl)
+            resp = get(downloadurl, stream=True)
             status = resp.status_code
             if status == 401:
                 log.Warn("Session expired: %s" % resp.read())
